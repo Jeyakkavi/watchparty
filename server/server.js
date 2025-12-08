@@ -10,9 +10,9 @@ const jwt = require('jsonwebtoken');
 const app = express();
 app.use(express.json());
 
-const FRONTEND = process.env.CORS_ORIGIN || 'http://localhost:5173';
+const FRONTEND = process.env.CLIENT_URL || 'http://localhost:5173';
 app.use(cors({ origin: FRONTEND, credentials: true }));
-
+ 
 // configure passport + oauth endpoints
 configureAuth(app, {
   GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
