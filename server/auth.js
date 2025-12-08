@@ -41,8 +41,10 @@ function configureAuth(app, options) {
     const token = jwt.sign(payload, JWT_SECRET, { expiresIn: '7d' });
 
     // Redirect with token (fragm or query). We'll use fragment to avoid server logs.
-    const redirectTo = `${options.frontendOrigin}/?token=${token}`;
-    res.redirect(redirectTo);
+    const CLIENT_URL = process.env.CLIENT_URL || "http://localhost:5173";
+
+    res.redirect(`${CLIENT_URL}/?token=${token}`);
+
   });
 
   app.get('/auth/failure', (req, res) => {
