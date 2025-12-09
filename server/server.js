@@ -102,6 +102,10 @@ io.on('connection', (socket) => {
     chats[roomId].push(item);
     io.to(roomId).emit('chat-message', item);
   });
+  // Receive sync data from host
+  socket.on("sync", ({ roomId, time, state }) => {
+  socket.to(roomId).emit("sync", { time, state });
+  });
 
   socket.on('disconnect', () => {
     console.log('User disconnected', socket.id);
