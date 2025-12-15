@@ -1,77 +1,59 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function Room({ socket, roomId }) {
-  const ytReady = useRef(false);
-  const playerRef = useRef(null);
   const videoRef = useRef(null);
-  const pendingYT = useRef(null);
   const isRemote = useRef(false);
 
-  const [isYouTube, setIsYouTube] = useState(false);
   const [src, setSrc] = useState("");
+  const [mp4, setMP4] = useState("");
 
-  // join room + socket listeners
+  // Join room & listeners
   useEffect(() => {
     if (!socket) return;
+
     socket.emit("join-room", { roomId });
 
     socket.on("sync-state", (room) => {
       if (!room) return;
-      setIsYouTube(room.isYouTube);
       setSrc(room.src || "");
     });
 
-    socket.on("control", ({ action, time, src, isYouTube }) => {
+    socket.on("control", ({ action, time, src }) => {
+      const v = videoRef.current;
+      if (!v) return;
+
       isRemote.current = true;
-      setIsYouTube(isYouTube);
-      setSrc(src);
 
-      // YOUTUBE APPLY
-      if (isYouTube) {
-        if (playerRef.current) applyYT(action, src, time);
-        else pendingYT.current = { action, src, time };
+      if (action === "load") {
+        setSrc(src);
+        v.src = src;
+        v.load();
       }
-      // MP4 APPLY
-      else {
-        const v = videoRef.current;
-        if (!v) return;
-
-        if (action === "load") {
-          v.src = src;
-          v.load();
-        }
-        if (action === "play") {
-          v.currentTime = time;
-          v.play().catch(() => {});
-        }
-        if (action === "pause") {
-          v.currentTime = time;
-          v.pause();
-        }
-        if (action === "seek") {
-          v.currentTime = time;
-        }
+      if (action === "play") {
+        v.currentTime = time;
+        v.play().catch(() => {});
+      }
+      if (action === "pause") {
+        v.currentTime = time;
+        v.pause();
+      }
+      if (action === "seek") {
+        v.currentTime = time;
       }
 
       setTimeout(() => (isRemote.current = false), 300);
     });
 
-    socket.on("sync", ({ time, state, videoType }) => {
+    socket.on("sync", ({ time, state }) => {
       if (isRemote.current) return;
+      const v = videoRef.current;
+      if (!v) return;
 
-      if (videoType === "youtube") {
-        if (!playerRef.current) return;
-        const cur = playerRef.current.getCurrentTime();
-        if (Math.abs(cur - time) > 0.5) playerRef.current.seekTo(time, true);
-        if (state === 1) playerRef.current.playVideo();
-        if (state === 2) playerRef.current.pauseVideo();
-      } else {
-        const v = videoRef.current;
-        if (!v) return;
-        if (Math.abs(v.currentTime - time) > 0.5) v.currentTime = time;
-        if (state === 1) v.play().catch(() => {});
-        if (state === 2) v.pause();
+      if (Math.abs(v.currentTime - time) > 0.5) {
+        v.currentTime = time;
       }
+      if (state === 1) v.play().catch(() => {});
+      if (state === 2) v.pause();
     });
 
     return () => {
@@ -81,176 +63,136 @@ export default function Room({ socket, roomId }) {
     };
   }, [socket, roomId]);
 
-  // YT API load
-  useEffect(() => {
-    if (window.YT && window.YT.Player) {
-      createPlayer();
-      return;
-    }
-
-    const tag = document.createElement("script");
-    tag.src = "https://www.youtube.com/iframe_api";
-    document.body.appendChild(tag);
-    window.onYouTubeIframeAPIReady = () => createPlayer();
-
-    function createPlayer() {
-      playerRef.current = new YT.Player("ytplayer", {
-        height: "400",
-        width: "700",
-        videoId: isYouTube ? src : "",
-        events: {
-          onReady: () => {
-            ytReady.current = true;
-
-            if (pendingYT.current) {
-              const { action, src, time } = pendingYT.current;
-              applyYT(action, src, time);
-              pendingYT.current = null;
-            }
-      },
-
-          onStateChange: (e) => {
-            if (isRemote.current) return;
-            const time = playerRef.current.getCurrentTime();
-            if (e.data === 1)
-              socket.emit("control", { roomId, action: "play", time, src, isYouTube: true });
-            if (e.data === 2)
-              socket.emit("control", { roomId, action: "pause", time, src, isYouTube: true });
-            if (e.data === 3)
-              socket.emit("control", { roomId, action: "seek", time, src, isYouTube: true });
-          },
-        },
-      });
-    }
-  }, []);
-
-  // YT apply function
-function applyYT(action, src, time = 0) {
-  const p = playerRef.current;
-  if (!p || typeof p.loadVideoById !== "function") return;
-
-  if (action === "load") p.loadVideoById(src);
-  if (action === "play") {
-    p.seekTo(time, true);
-    p.playVideo();
-  }
-  if (action === "pause") {
-    p.seekTo(time, true);
-    p.pauseVideo();
-  }
-
-  if (action === "seek") {
-    p.seekTo(time, true);
-  }
-  }
-
-  // MP4 events  
+  // Local video → socket
   useEffect(() => {
     const v = videoRef.current;
     if (!v) return;
 
-    const play = () =>
-      !isRemote.current &&
+    const emit = (action) => {
+      if (isRemote.current) return;
       socket.emit("control", {
         roomId,
-        action: "play",
+        action,
         time: v.currentTime,
         src,
-        isYouTube: false,
       });
+    };
 
-    const pause = () =>
-      !isRemote.current &&
-      socket.emit("control", {
-        roomId,
-        action: "pause",
-        time: v.currentTime,
-        src,
-        isYouTube: false,
-      });
-
-    const seek = () =>
-      !isRemote.current &&
-      socket.emit("control", {
-        roomId,
-        action: "seek",
-        time: v.currentTime,
-        src,
-        isYouTube: false,
-      });
-
-    v.addEventListener("play", play);
-    v.addEventListener("pause", pause);
-    v.addEventListener("seeked", seek);
+    v.addEventListener("play", () => emit("play"));
+    v.addEventListener("pause", () => emit("pause"));
+    v.addEventListener("seeked", () => emit("seek"));
 
     return () => {
-      v.removeEventListener("play", play);
-      v.removeEventListener("pause", pause);
-      v.removeEventListener("seeked", seek);
+      v.removeEventListener("play", () => emit("play"));
+      v.removeEventListener("pause", () => emit("pause"));
+      v.removeEventListener("seeked", () => emit("seek"));
     };
-  }, [src]);
+  }, [src, socket, roomId]);
 
-  // LOAD functions
-  const loadMP4 = (url) => {
-    if (!url) return;
-    setIsYouTube(false);
-    setSrc(url);
-    if (videoRef.current) {
+  const loadMP4 = () => {
+    if (!mp4) return alert("Paste a public MP4 URL");
+
+    setSrc(mp4);
+    const v = videoRef.current;
+
+    if (v) {
       isRemote.current = true;
-      videoRef.current.src = url;
-      videoRef.current.load();
+      v.src = mp4;
+      v.load();
       setTimeout(() => (isRemote.current = false), 300);
     }
-    socket.emit("control", { roomId, action: "load", src: url, isYouTube: false });
+
+    socket.emit("control", {
+      roomId,
+      action: "load",
+      src: mp4,
+    });
   };
 
-const loadYT = (input) => {
-  if (!input) return;
-
-  let id = input;
-  try {
-    const u = new URL(input);
-    if (u.hostname.includes("youtube")) id = u.searchParams.get("v");
-    if (u.hostname === "youtu.be") id = u.pathname.slice(1);
-  } catch {}
-
-  setIsYouTube(true);
-  setSrc(id);
-
-  // ✅ ONLY emit — never touch player directly
-  socket.emit("control", {
-    roomId,
-    action: "load",
-    src: id,
-    isYouTube: true,
-  });
-};
-
-
-
-  // UI
-  const [mp4, setMP4] = useState("");
-  const [yt, setYT] = useState("");
-
   return (
-    <div style={{ padding: 20 }}>
-      <h2>Room: {roomId}</h2>
+    <div style={styles.page}>
+      <div style={styles.card}>
+        <h2>🎬 Watch Party</h2>
+        <p style={{ color: "#aaa" }}>Room ID: {roomId}</p>
 
-      <input value={mp4} onChange={(e) => setMP4(e.target.value)} placeholder="MP4 URL" />
-      <button onClick={() => loadMP4(mp4)}>Load MP4</button>
+        <div style={styles.inputRow}>
+          <input
+            style={styles.input}
+            placeholder="Paste public MP4 video URL"
+            value={mp4}
+            onChange={(e) => setMP4(e.target.value)}
+          />
+          <button style={styles.button} onClick={loadMP4}>
+            Load Video
+          </button>
+        </div>
 
-      <br /><br />
+        <p style={styles.hint}>
+          ℹ️ Only one person needs to load the video. Everyone stays in sync.
+        </p>
 
-      <input value={yt} onChange={(e) => setYT(e.target.value)} placeholder="YT URL or ID" />
-      <button onClick={() => loadYT(yt)}>Load YouTube</button>
-
-      <br /><br />
-
-      {isYouTube ? (
-        <div id="ytplayer"></div>
-      ) : (
-        <video ref={videoRef} width="700" controls src={src || undefined} />
-      )}
+        <div style={styles.videoBox}>
+          <video
+            ref={videoRef}
+            src={src || undefined}
+            controls
+            style={styles.video}
+          />
+        </div>
+      </div>
     </div>
   );
 }
+
+const styles = {
+  page: {
+    minHeight: "100vh",
+    background: "#0f0f0f",
+    display: "flex",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  card: {
+    background: "#1c1c1c",
+    padding: 24,
+    borderRadius: 12,
+    width: 800,
+    boxShadow: "0 0 20px rgba(0,0,0,0.6)",
+  },
+  inputRow: {
+    display: "flex",
+    gap: 10,
+    marginTop: 10,
+  },
+  input: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 6,
+    border: "1px solid #333",
+    background: "#111",
+    color: "#fff",
+  },
+  button: {
+    padding: "10px 16px",
+    borderRadius: 6,
+    background: "#4f46e5",
+    color: "#fff",
+    border: "none",
+    cursor: "pointer",
+  },
+  hint: {
+    fontSize: 12,
+    color: "#888",
+    marginTop: 8,
+  },
+  videoBox: {
+    marginTop: 16,
+    borderRadius: 8,
+    overflow: "hidden",
+    background: "#000",
+  },
+  video: {
+    width: "100%",
+    height: "auto",
+  },
+};
