@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function Room({ socket, roomId }) {
+  const ytReady = useRef(false);
   const playerRef = useRef(null);
   const videoRef = useRef(null);
   const pendingYT = useRef(null);
@@ -99,12 +100,15 @@ export default function Room({ socket, roomId }) {
         videoId: isYouTube ? src : "",
         events: {
           onReady: () => {
+            ytReady.current = true;
+
             if (pendingYT.current) {
               const { action, src, time } = pendingYT.current;
               applyYT(action, src, time);
               pendingYT.current = null;
             }
-          },
+      },
+
           onStateChange: (e) => {
             if (isRemote.current) return;
             const time = playerRef.current.getCurrentTime();
@@ -120,21 +124,24 @@ export default function Room({ socket, roomId }) {
     }
   }, []);
 
-  function applyYT(action, src, time) {
-    if (!playerRef.current) return;
+  // YT apply function
+function applyYT(action, src, time = 0) {
+  const p = playerRef.current;
+  if (!p || typeof p.loadVideoById !== "function") return;
 
-    if (action === "load") playerRef.current.loadVideoById(src);
-    if (action === "play") {
-      playerRef.current.seekTo(time, true);
-      playerRef.current.playVideo();
-    }
-    if (action === "pause") {
-      playerRef.current.seekTo(time, true);
-      playerRef.current.pauseVideo();
-    }
-    if (action === "seek") {
-      playerRef.current.seekTo(time, true);
-    }
+  if (action === "load") p.loadVideoById(src);
+  if (action === "play") {
+    p.seekTo(time, true);
+    p.playVideo();
+  }
+  if (action === "pause") {
+    p.seekTo(time, true);
+    p.pauseVideo();
+  }
+
+  if (action === "seek") {
+    p.seekTo(time, true);
+  }
   }
 
   // MP4 events  
@@ -197,27 +204,29 @@ export default function Room({ socket, roomId }) {
     socket.emit("control", { roomId, action: "load", src: url, isYouTube: false });
   };
 
-  const loadYT = (input) => {
-    if (!input) return;
+const loadYT = (input) => {
+  if (!input) return;
 
-    let id = input;
-    try {
-      const u = new URL(input);
-      if (u.hostname.includes("youtube")) id = u.searchParams.get("v");
-      if (u.hostname === "youtu.be") id = u.pathname.slice(1);
-    } catch {}
+  let id = input;
+  try {
+    const u = new URL(input);
+    if (u.hostname.includes("youtube")) id = u.searchParams.get("v");
+    if (u.hostname === "youtu.be") id = u.pathname.slice(1);
+  } catch {}
 
-    setIsYouTube(true);
-    setSrc(id);
+  setIsYouTube(true);
+  setSrc(id);
 
-    if (playerRef.current) {
-      isRemote.current = true;
-      playerRef.current.loadVideoById(id);
-      setTimeout(() => (isRemote.current = false), 300);
-    } else pendingYT.current = { action: "load", src: id };
+  // ✅ ONLY emit — never touch player directly
+  socket.emit("control", {
+    roomId,
+    action: "load",
+    src: id,
+    isYouTube: true,
+  });
+};
 
-    socket.emit("control", { roomId, action: "load", src: id, isYouTube: true });
-  };
+
 
   // UI
   const [mp4, setMP4] = useState("");
