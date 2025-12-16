@@ -1,8 +1,8 @@
 import { useState } from "react";
 import io from "socket.io-client";
 import Room from "./Room";
-
-const socket = io("http://localhost:5000");
+const socket = io(import.meta.env.VITE_SERVER);
+const SERVER = import.meta.env.VITE_SERVER;
 
 export default function App() {
   const [roomId, setRoomId] = useState("");
