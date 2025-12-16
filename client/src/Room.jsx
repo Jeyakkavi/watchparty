@@ -1,33 +1,25 @@
 import { useEffect, useRef, useState } from "react";
 
 export default function Room({ socket, roomId }) {
-  const localVideo = useRef();
-  const remoteVideo = useRef();
-  const watchVideo = useRef();
+  const localVideo = useRef(null);
+  const remoteVideo = useRef(null);
   const pc = useRef(null);
-  const localStream = useRef(null);
 
-  const [micOn, setMicOn] = useState(true);
-  const [camOn, setCamOn] = useState(true);
+  const [status, setStatus] = useState("Waiting for another user...");
 
-  // ================== WEBRTC ==================
-  const startMedia = async (screen = false) => {
-    const stream = screen
-      ? await navigator.mediaDevices.getDisplayMedia({ video: true })
-      : await navigator.mediaDevices.getUserMedia({
-          video: true,
-          audio: true,
-        });
-
-    localStream.current = stream;
+  const startMedia = async () => {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: true,
+      audio: true,
+    });
     localVideo.current.srcObject = stream;
 
     pc.current = new RTCPeerConnection({
       iceServers: [{ urls: "stun:stun.l.google.com:19302" }],
     });
 
-    stream.getTracks().forEach((t) =>
-      pc.current.addTrack(t, stream)
+    stream.getTracks().forEach((track) =>
+      pc.current.addTrack(track, stream)
     );
 
     pc.current.ontrack = (e) => {
@@ -35,130 +27,74 @@ export default function Room({ socket, roomId }) {
     };
 
     pc.current.onicecandidate = (e) => {
-      if (e.candidate)
+      if (e.candidate) {
         socket.emit("ice-candidate", {
           roomId,
           candidate: e.candidate,
         });
+      }
     };
   };
 
-  const call = async () => {
-    await startMedia();
-    const offer = await pc.current.createOffer();
-    await pc.current.setLocalDescription(offer);
-    socket.emit("offer", { roomId, offer });
-  };
-
-  // ================== SOCKET ==================
   useEffect(() => {
     socket.emit("join-room", roomId);
 
+    socket.on("room-info", async ({ count }) => {
+      if (count === 1) {
+        await startMedia();
+      }
+
+      if (count === 2) {
+        await startMedia();
+        setStatus("Connecting...");
+
+        const offer = await pc.current.createOffer();
+        await pc.current.setLocalDescription(offer);
+        socket.emit("offer", { roomId, offer });
+      }
+
+      if (count > 2) {
+        alert("Room full (1-to-1 only)");
+      }
+    });
+
     socket.on("offer", async (offer) => {
-      await startMedia();
       await pc.current.setRemoteDescription(offer);
       const answer = await pc.current.createAnswer();
       await pc.current.setLocalDescription(answer);
       socket.emit("answer", { roomId, answer });
+      setStatus("Connected");
     });
 
     socket.on("answer", async (answer) => {
       await pc.current.setRemoteDescription(answer);
+      setStatus("Connected");
     });
 
     socket.on("ice-candidate", (candidate) => {
       pc.current.addIceCandidate(candidate);
     });
 
-    socket.on("video-control", ({ action, time, src }) => {
-      if (action === "load") {
-        watchVideo.current.src = src;
-      }
-      if (action === "play") {
-        watchVideo.current.currentTime = time;
-        watchVideo.current.play();
-      }
-      if (action === "pause") {
-        watchVideo.current.currentTime = time;
-        watchVideo.current.pause();
-      }
-    });
+    return () => socket.disconnect();
   }, []);
 
-  // ================== CONTROLS ==================
-  const toggleMic = () => {
-    localStream.current
-      .getAudioTracks()
-      .forEach((t) => (t.enabled = !micOn));
-    setMicOn(!micOn);
-  };
-
-  const toggleCam = () => {
-    localStream.current
-      .getVideoTracks()
-      .forEach((t) => (t.enabled = !camOn));
-    setCamOn(!camOn);
-  };
-
-  const shareScreen = async () => {
-    await startMedia(true);
-    const offer = await pc.current.createOffer();
-    await pc.current.setLocalDescription(offer);
-    socket.emit("offer", { roomId, offer });
-  };
-
-  // ================== WATCH PARTY ==================
-  const loadVideo = () => {
-    const url = prompt("MP4 URL");
-    socket.emit("video-control", {
-      roomId,
-      action: "load",
-      src: url,
-    });
-  };
-
-  const playVideo = () =>
-    socket.emit("video-control", {
-      roomId,
-      action: "play",
-      time: watchVideo.current.currentTime,
-    });
-
-  const pauseVideo = () =>
-    socket.emit("video-control", {
-      roomId,
-      action: "pause",
-      time: watchVideo.current.currentTime,
-    });
-
-  // ================== UI ==================
   return (
     <div>
-      <h2>Room: {roomId}</h2>
+      <h3>{status}</h3>
 
-      <button onClick={call}>Start Call</button>
-      <button onClick={toggleMic}>
-        {micOn ? "Mute Mic" : "Unmute Mic"}
-      </button>
-      <button onClick={toggleCam}>
-        {camOn ? "Camera Off" : "Camera On"}
-      </button>
-      <button onClick={shareScreen}>Share Screen</button>
-
-      <hr />
-
-      <button onClick={loadVideo}>Load MP4</button>
-      <button onClick={playVideo}>Play</button>
-      <button onClick={pauseVideo}>Pause</button>
-
-      <div style={{ display: "flex", gap: 20, marginTop: 20 }}>
-        <video ref={localVideo} autoPlay muted width="250" />
-        <video ref={remoteVideo} autoPlay width="250" />
+      <div style={{ display: "flex", gap: 20 }}>
         <video
-          ref={watchVideo}
-          controls
-          width="400"
-          style={{ background: "black" }}
+          ref={localVideo}
+          autoPlay
+          muted
+          playsInline
+          style={{ width: 300, background: "#000" }}
+        />
+        <video
+          ref={remoteVideo}
+          autoPlay
+          playsInline
+          style={{ width: 300, background: "#000" }}
         />
       </div>
     </div>

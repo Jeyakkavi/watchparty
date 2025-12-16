@@ -9,10 +9,10 @@ export default function App() {
   const [joined, setJoined] = useState(false);
 
   return (
-    <div style={{ padding: 30 }}>
+    <div style={{ padding: 40 }}>
       {!joined ? (
         <>
-          <h2>Join Room</h2>
+          <h2>Video Chat</h2>
           <input
             placeholder="Room ID"
             value={roomId}
